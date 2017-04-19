@@ -129,22 +129,51 @@ get_con_client_type(HANDLE pipe) {
 	if (ImpersonateNamedPipeClient(pipe) == FALSE)
 		return -1;
 
-	if (LookupAccountNameW(NULL, sshd_act, NULL, &sshd_sid_len, NULL, &reg_dom_len, &nuse) == TRUE ||
-		(sshd_sid = malloc(sshd_sid_len)) == NULL ||
-		(ref_dom = (wchar_t*)malloc(reg_dom_len * 2)) == NULL ||
-		LookupAccountNameW(NULL, sshd_act, sshd_sid, &sshd_sid_len, ref_dom, &reg_dom_len, &nuse) == FALSE ||
-		OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, FALSE, &token) == FALSE ||
-		GetTokenInformation(token, TokenUser, NULL, 0, &info_len) == TRUE ||
-		(info = (TOKEN_USER*)malloc(info_len)) == NULL ||
-		GetTokenInformation(token, TokenUser, info, info_len, &info_len) == FALSE)
+	if (LookupAccountNameW(NULL, sshd_act, NULL, &sshd_sid_len, NULL, &reg_dom_len, &nuse) == TRUE) {
+		debug("LookupAccountNameW succeeded unexpectedly");
 		goto done;
+	}
+	if ((sshd_sid = malloc(sshd_sid_len)) == NULL || 
+	    (ref_dom = (wchar_t*)malloc(reg_dom_len * 2)) == NULL) {
+		debug("out of memory");
+		goto done;
+	}
+	if (LookupAccountNameW(NULL, sshd_act, sshd_sid, &sshd_sid_len, ref_dom, &reg_dom_len, &nuse) == FALSE) {
+		debug("LookupAccountNameW failed with %d", GetLastError());
+		goto done;
+	}
+		
+	if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, FALSE, &token) == FALSE) {
+		debug("OpenThreadToken failed with %d", GetLastError());
+		goto done;
+	}
+	
+	if (GetTokenInformation(token, TokenUser, NULL, 0, &info_len) == TRUE) {
+		debug("GetTokenInformation succeeded unexpectedly");
+		goto done;
+	}
+		
+	if ((info = (TOKEN_USER*)malloc(info_len)) == NULL) {
+		debug("out of memory");
+		goto done;
+	}
+	
+	if (GetTokenInformation(token, TokenUser, info, info_len, &info_len) == FALSE) {
+		debug("GetTokenInformation failed with %d", GetLastError());
+		goto done;
+	}
+
 
 	sid_size = SECURITY_MAX_SID_SIZE;
-	if (CreateWellKnownSid(WinLocalSystemSid, NULL, system_sid, &sid_size) == FALSE)
+	if (CreateWellKnownSid(WinLocalSystemSid, NULL, system_sid, &sid_size) == FALSE) {
+		debug("CreateWellKnownSid for LocalSystem failed with %d", GetLastError());
 		goto done;
+	}
 	sid_size = SECURITY_MAX_SID_SIZE;
-	if (CreateWellKnownSid(WinNetworkServiceSid, NULL, ns_sid, &sid_size) == FALSE)
+	if (CreateWellKnownSid(WinNetworkServiceSid, NULL, ns_sid, &sid_size) == FALSE) {
+		debug("CreateWellKnownSid for NetworkService failed with %d", GetLastError());
 		goto done;
+	}
 
 	if (EqualSid(info->User.Sid, system_sid))
 		r = LOCAL_SYSTEM;
